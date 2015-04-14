@@ -8,6 +8,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include "http.h"
+
+/* HTTP version */
+#define HTTP_VER_MAJOR	1
+#define HTTP_VER_MINOR	1
+#define HTTP_VER_STR	"1.1"
+
+/* maximum request length: 64mb */
+#define MAX_REQ_LENGTH	(65536 * 1024)
 
 struct client {
 	int s;
@@ -19,6 +28,8 @@ struct client {
 int start_server(void);
 int accept_conn(int lis);
 int handle_client(struct client *c);
+void respond_error(struct client *c, int errcode);
+int parse_args(int argc, char **argv);
 
 static int lis;
 static int port = 8080;
@@ -26,6 +37,10 @@ static struct client *clist;
 
 int main(int argc, char **argv)
 {
+	if(parse_args(argc, argv) == -1) {
+		return 1;
+	}
+
 	if((lis = start_server()) == -1) {
 		return 1;
 	}
@@ -128,37 +143,108 @@ int accept_conn(int lis)
 	return 0;
 }
 
+void close_conn(struct client *c)
+{
+	close(c->s);
+	c->s = -1;	/* mark it for removal */
+	free(c->rcvbuf);
+}
+
+static char *skip_space(char *s, char *endp)
+{
+	while(s < endp && *s && isspace(*s))
+		++s;
+	return s;
+}
+
 int handle_client(struct client *c)
 {
+	char *reqp, *hdrp, *bodyp, *endp, *eol;
+	char req_type[32];
 	static char buf[2048];
 	int rdsz;
 
 	while((rdsz = recv(c->s, buf, sizeof buf, 0)) > 0) {
 		if(c->rcvbuf) {
 			int newsz = c->bufsz + rdsz;
-			char *newbuf = realloc(buf, newsz);
+			if(newsz > MAX_REQ_LENGTH) {
+				respond_error(c, 413);
+				return -1;
+			}
+
+			char *newbuf = realloc(buf, newsz + 1);
 			if(!newbuf) {
 				fprintf(stderr, "failed to allocate %d byte buffer\n", newsz);
-				/* TODO http error */
-				goto drop;
+				respond_error(c, 503);
+				return -1;
 			}
 
 			memcpy(newbuf + c->bufsz, buf, rdsz);
+			newbuf[newsz] = 0;
 
 			c->rcvbuf = newbuf;
 			c->bufsz = newsz;
 		}
 	}
 
+	endp = c->rcvbuf + c->bufsz;
+	if((reqp = skip_space(buf, endp)) >= endp) {
+		return 0;	/* incomplete have to read more ... */
+	}
+
+
+	/* we only support GET and HEAD at this point, so freak out on anything else */
+
 	/* TODO: parse header, drop on invalid, determine if the request
 	 * is complete and process
 	 */
+}
 
-	if(rdsz == -1 && errno != EAGAIN) {
-drop:
-		close(c->s);
-		c->s = -1;
-		free(c->rcvbuf);
+void respond_error(struct client *c, int errcode)
+{
+	char buf[512];
+
+	sprintf(buf, HTTP_VER_STR " %d %s\r\n\r\n", errcode, http_strmsg(errcode));
+
+	send(c->s, buf, strlen(buf), 0);
+	close_conn(c);
+}
+
+
+static void print_help(const char *argv0)
+{
+	printf("Usage: %s [options]\n", argv0);
+	printf("Options:\n");
+	printf(" -p <port>  set the TCP/IP port number to use\n");
+	printf(" -h         print usage help and exit\n");
+}
+
+int parse_args(int argc, char **argv)
+{
+	int i;
+
+	for(i=1; i<argc; i++) {
+		if(argv[i][0] == '-' && argv[i][2] == 0) {
+			switch(argv[i][1]) {
+			case 'p':
+				if((port = atoi(argv[++i])) == 0) {
+					fprintf(stderr, "-p must be followed by a valid port number\n");
+					return -1;
+				}
+				break;
+
+			case 'h':
+				print_help(argv[0]);
+				exit(0);
+
+			default:
+				fprintf(stderr, "unrecognized option: %s\n", argv[i]);
+				return -1;
+			}
+		} else {
+			fprintf(stderr, "unexpected argument: %s\n", argv[i]);
+			return -1;
+		}
 	}
 	return 0;
 }
