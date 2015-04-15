@@ -1,5 +1,28 @@
 #include "http.h"
 
+int http_parse_header(struct http_req_header *hdr, const char *buf, int bufsz)
+{
+	int i, nlines = 0;
+	char *endhdr;
+	char *rqline = 0;
+
+	for(i=1; i<bufsz; i++) {
+		if(buf[i] == '\n' && buf[i - 1] == '\r') {
+			if(!rqline) {
+				rqline = alloca(i);
+				memcpy(rqline, buf, i - 1);
+				rqline[i - 1] = 0;
+			}
+			++nlines;
+		}
+	}
+
+	if(!rqline)
+		return -1;
+
+
+}
+
 const char *http_strmsg(int code)
 {
 	static const char **msgxxx[] = {

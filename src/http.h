@@ -33,8 +33,14 @@ struct http_req_header {
 	enum http_method method;
 	char *uri;
 	int ver_major, ver_minor;	/* http version */
-	/* XXX cont. */
+	char **hdrfields;
+	int num_hdrfields;
 };
+
+
+int http_parse_header(struct http_req_header *hdr, const char *buf, int bufsz);
+
+const char *http_strmsg(int code);
 
 
 /* HTTP 1xx message strings */
@@ -97,7 +103,5 @@ const char *http_msg5xx[] = {
 	"Gateway Time-out",			/* 504 */
 	"HTTP Version not supported"	/* 505 */
 };
-
-const char *http_strmsg(int code);
 
 #endif	/* HTTP_H_ */
