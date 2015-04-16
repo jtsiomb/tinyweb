@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <signal.h>
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -27,8 +29,11 @@ struct client {
 
 int start_server(void);
 int accept_conn(int lis);
+void close_conn(struct client *c);
 int handle_client(struct client *c);
+void do_get_head(struct client *c);
 void respond_error(struct client *c, int errcode);
+void sighandler(int s);
 int parse_args(int argc, char **argv);
 
 static int lis;
@@ -40,6 +45,10 @@ int main(int argc, char **argv)
 	if(parse_args(argc, argv) == -1) {
 		return 1;
 	}
+
+	signal(SIGINT, sighandler);
+	signal(SIGTERM, sighandler);
+	signal(SIGQUIT, sighandler);
 
 	if((lis = start_server()) == -1) {
 		return 1;
@@ -91,6 +100,8 @@ int main(int argc, char **argv)
 			}
 		}
 	}
+
+	return 0;	/* unreachable */
 }
 
 int start_server(void)
@@ -150,30 +161,22 @@ void close_conn(struct client *c)
 	free(c->rcvbuf);
 }
 
-static char *skip_space(char *s, char *endp)
-{
-	while(s < endp && *s && isspace(*s))
-		++s;
-	return s;
-}
-
 int handle_client(struct client *c)
 {
-	char *reqp, *hdrp, *bodyp, *endp, *eol;
-	char req_type[32];
+	struct http_req_header hdr;
 	static char buf[2048];
-	int rdsz;
+	int rdsz, status;
 
 	while((rdsz = recv(c->s, buf, sizeof buf, 0)) > 0) {
 		if(c->rcvbuf) {
+			char *newbuf;
 			int newsz = c->bufsz + rdsz;
 			if(newsz > MAX_REQ_LENGTH) {
 				respond_error(c, 413);
 				return -1;
 			}
 
-			char *newbuf = realloc(buf, newsz + 1);
-			if(!newbuf) {
+			if(!(newbuf = realloc(buf, newsz + 1))) {
 				fprintf(stderr, "failed to allocate %d byte buffer\n", newsz);
 				respond_error(c, 503);
 				return -1;
@@ -187,17 +190,41 @@ int handle_client(struct client *c)
 		}
 	}
 
-	endp = c->rcvbuf + c->bufsz;
-	if((reqp = skip_space(buf, endp)) >= endp) {
-		return 0;	/* incomplete have to read more ... */
-	}
+	if((status = http_parse_header(&hdr, c->rcvbuf, c->bufsz)) != HTTP_HDR_OK) {
+		http_print_header(&hdr);
+		switch(status) {
+		case HTTP_HDR_INVALID:
+			respond_error(c, 400);
+			return -1;
 
+		case HTTP_HDR_NOMEM:
+			respond_error(c, 503);
+			return -1;
+
+		case HTTP_HDR_PARTIAL:
+			return 0;	/* partial header, continue reading */
+		}
+	}
+	http_print_header(&hdr);
 
 	/* we only support GET and HEAD at this point, so freak out on anything else */
+	switch(hdr.method) {
+	case HTTP_GET:
+	case HTTP_HEAD:
+		do_get_head(c);
+		break;
 
-	/* TODO: parse header, drop on invalid, determine if the request
-	 * is complete and process
-	 */
+	default:
+		respond_error(c, 501);
+		return -1;
+	}
+
+	close_conn(c);
+	return 0;
+}
+
+void do_get_head(struct client *c)
+{
 }
 
 void respond_error(struct client *c, int errcode)
@@ -208,6 +235,23 @@ void respond_error(struct client *c, int errcode)
 
 	send(c->s, buf, strlen(buf), 0);
 	close_conn(c);
+}
+
+void sighandler(int s)
+{
+	if(s == SIGINT || s == SIGTERM || s == SIGQUIT) {
+		close(lis);
+		while(clist) {
+			struct client *c = clist;
+			clist = clist->next;
+			close_conn(c);
+			free(c);
+		}
+		clist = 0;
+
+		printf("bye!\n");
+		exit(0);
+	}
 }
 
 
