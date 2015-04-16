@@ -99,6 +99,7 @@ int main(int argc, char **argv)
 				c = c->next;
 			}
 		}
+		clist = dummy.next;
 	}
 
 	return 0;	/* unreachable */
@@ -168,26 +169,24 @@ int handle_client(struct client *c)
 	int rdsz, status;
 
 	while((rdsz = recv(c->s, buf, sizeof buf, 0)) > 0) {
-		if(c->rcvbuf) {
-			char *newbuf;
-			int newsz = c->bufsz + rdsz;
-			if(newsz > MAX_REQ_LENGTH) {
-				respond_error(c, 413);
-				return -1;
-			}
-
-			if(!(newbuf = realloc(buf, newsz + 1))) {
-				fprintf(stderr, "failed to allocate %d byte buffer\n", newsz);
-				respond_error(c, 503);
-				return -1;
-			}
-
-			memcpy(newbuf + c->bufsz, buf, rdsz);
-			newbuf[newsz] = 0;
-
-			c->rcvbuf = newbuf;
-			c->bufsz = newsz;
+		char *newbuf;
+		int newsz = c->bufsz + rdsz;
+		if(newsz > MAX_REQ_LENGTH) {
+			respond_error(c, 413);
+			return -1;
 		}
+
+		if(!(newbuf = realloc(c->rcvbuf, newsz + 1))) {
+			fprintf(stderr, "failed to allocate %d byte buffer\n", newsz);
+			respond_error(c, 503);
+			return -1;
+		}
+
+		memcpy(newbuf + c->bufsz, buf, rdsz);
+		newbuf[newsz] = 0;
+
+		c->rcvbuf = newbuf;
+		c->bufsz = newsz;
 	}
 
 	if((status = http_parse_header(&hdr, c->rcvbuf, c->bufsz)) != HTTP_HDR_OK) {

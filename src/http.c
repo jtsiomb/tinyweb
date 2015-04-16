@@ -146,11 +146,12 @@ int http_parse_header(struct http_req_header *hdr, const char *buf, int bufsz)
 
 	startln = buf;
 	endln = buf;
-	for(i=1; i<hdr->body_offset; i++) {
+	for(i=1; i<hdr->body_offset - 2; i++) {
 		if(buf[i] == '\n' && buf[i - 1] == '\r') {
 			int linesz;
+
 			endln = buf + i - 1;
-			linesz = endln - startln - 1;
+			linesz = endln - startln;
 
 			if(startln > buf) {	/* skip first line */
 				int idx = hdr->num_hdrfields++;
