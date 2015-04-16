@@ -6,11 +6,14 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/select.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include "http.h"
+#include "mime.h"
 
 /* HTTP version */
 #define HTTP_VER_MAJOR	1
@@ -31,7 +34,7 @@ int start_server(void);
 int accept_conn(int lis);
 void close_conn(struct client *c);
 int handle_client(struct client *c);
-void do_get_head(struct client *c);
+int do_get(struct client *c, const char *uri, int with_body);
 void respond_error(struct client *c, int errcode);
 void sighandler(int s);
 int parse_args(int argc, char **argv);
@@ -39,6 +42,14 @@ int parse_args(int argc, char **argv);
 static int lis;
 static int port = 8080;
 static struct client *clist;
+
+static const char *indexfiles[] = {
+	"index.cgi",
+	"index.html",
+	"index.htm",
+	0
+};
+
 
 int main(int argc, char **argv)
 {
@@ -209,8 +220,11 @@ int handle_client(struct client *c)
 	/* we only support GET and HEAD at this point, so freak out on anything else */
 	switch(hdr.method) {
 	case HTTP_GET:
+		do_get(c, hdr.uri, 1);
+		break;
+
 	case HTTP_HEAD:
-		do_get_head(c);
+		do_get(c, hdr.uri, 0);
 		break;
 
 	default:
@@ -222,8 +236,80 @@ int handle_client(struct client *c)
 	return 0;
 }
 
-void do_get_head(struct client *c)
+int do_get(struct client *c, const char *uri, int with_body)
 {
+	const char *ptr;
+	struct http_resp_header resp;
+
+	if((ptr = strstr(uri, "://"))) {
+		/* skip the host part */
+		if(!(uri = strchr(ptr + 3, '/'))) {
+			respond_error(c, 404);
+			return -1;
+		}
+		++uri;
+	}
+
+	if(*uri) {
+		struct stat st;
+		char *path = 0;
+		char *buf;
+		const char *type;
+		int fd, size;
+
+		if(stat(uri, &st) == -1) {
+			respond_error(c, 404);
+			return -1;
+		}
+
+		if(S_ISDIR(st.st_mode)) {
+			int i;
+			path = alloca(strlen(uri) + 64);
+
+			for(i=0; indexfiles[i]; i++) {
+				sprintf(path, "%s/%s", uri, indexfiles[i]);
+				if(stat(path, &st) == 0 && !S_ISDIR(st.st_mode)) {
+					break;
+				}
+			}
+
+			if(indexfiles[i] == 0) {
+				respond_error(c, 404);
+				return -1;
+			}
+		} else {
+			path = (char*)uri;
+		}
+
+		if((fd = open(path, O_RDONLY)) == -1) {
+			respond_error(c, 403);
+			return -1;
+		}
+
+		/* construct response header */
+		http_init_resp(&resp);
+		http_add_resp_field(&resp, "Content-Length: %d", st.st_size);
+		if((type = mime_type(path))) {
+			http_add_resp_field(&resp, "Content-Type: %s", type);
+		}
+
+		size = http_serialize_resp(&resp, 0);
+		buf = alloca(size);
+		http_serialize_resp(&resp, buf);
+		send(c->s, buf, size, 0);
+
+		if(with_body) {
+			char *cont = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+			if(cont == (void*)-1) {
+				respond_error(c, 503);
+				close(fd);
+				return -1;
+			}
+		}
+
+		close(fd);
+	}
+	return 0;
 }
 
 void respond_error(struct client *c, int errcode)

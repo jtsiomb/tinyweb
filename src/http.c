@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <ctype.h>
 #include <alloca.h>
 #include "http.h"
@@ -193,6 +194,91 @@ void http_destroy_header(struct http_req_header *hdr)
 		free(hdr->hdrfields);
 	}
 	free(hdr->uri);
+}
+
+int http_init_resp(struct http_resp_header *resp)
+{
+	memset(resp, 0, sizeof *resp);
+	resp->status = 200;
+	resp->ver_major = resp->ver_minor = 1;
+	resp->fields = 0;
+	resp->num_fields = 0;
+
+	return 0;
+}
+
+int http_add_resp_field(struct http_resp_header *resp, const char *fmt, ...)
+{
+	int sz;
+	va_list ap;
+	char *field, *newarr, tmp;
+
+	va_start(ap, fmt);
+	sz = vsnprintf(&tmp, 0, fmt, ap);
+	va_end(ap);
+
+	if(sz <= 0) sz = 1023;
+	if(!(field = malloc(sz + 1))) {
+		return -1;
+	}
+	va_start(ap, fmt);
+	vsnprintf(field, sz + 1, fmt, ap);
+	va_end(ap);
+
+	if(!(newarr = realloc(resp->fields, (resp->num_fields + 1) * sizeof *resp->fields))) {
+		free(field);
+		return -1;
+	}
+	resp->fields[resp->num_fields++] = newarr;
+	return 0;
+}
+
+void http_destroy_resp(struct http_resp_header *resp)
+{
+	int i;
+	if(resp->fields) {
+		for(i=0; i<resp->num_fields; i++) {
+			free(resp->fields[i]);
+		}
+		free(resp->fields);
+		resp->fields = 0;
+	}
+	resp->num_fields = 0;
+}
+
+int http_serialize_resp(struct http_resp_header *resp, char *buf)
+{
+	int i, stsize, size, *fsize;
+	char *ptr, tmp;
+
+	stsize = snprintf(&tmp, 0, "HTTP/%d.%d %d %s\r\n", resp->ver_major, resp->ver_minor,
+			resp->status, http_strmsg(resp->status));
+
+	fsize = alloca(resp->num_fields * sizeof *fsize);
+
+	size = stsize;
+	for(i=0; i<resp->num_fields; i++) {
+		int len = strlen(resp->fields[i]) + 2;
+		fsize[i] = len;
+		size += len;
+	}
+	size += 2;	/* CRLF and null */
+
+	if(buf) {
+		sprintf(buf, "HTTP/%d.%d %d %s\r\n", resp->ver_major, resp->ver_minor,
+				resp->status, http_strmsg(resp->status));
+
+		ptr = buf + stsize;
+		for(i=0; i<resp->num_fields; i++) {
+			sprintf(ptr, "%s\r\n", resp->fields[i]);
+			ptr += fsize[i];
+		}
+		*ptr++ = '\r';
+		*ptr++ = '\n';
+		*ptr++ = 0;
+	}
+
+	return size;
 }
 
 const char *http_strmsg(int code)

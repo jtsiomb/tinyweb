@@ -24,6 +24,13 @@ struct http_req_header {
 	int body_offset;
 };
 
+struct http_resp_header {
+	int status;
+	int ver_major, ver_minor;
+	char **fields;
+	int num_fields;
+};
+
 #define HTTP_HDR_OK			0
 #define HTTP_HDR_INVALID	-1
 #define HTTP_HDR_NOMEM		-2
@@ -32,6 +39,11 @@ struct http_req_header {
 int http_parse_header(struct http_req_header *hdr, const char *buf, int bufsz);
 void http_print_header(struct http_req_header *hdr);
 void http_destroy_header(struct http_req_header *hdr);
+
+int http_init_resp(struct http_resp_header *resp);
+int http_add_resp_field(struct http_resp_header *resp, const char *fmt, ...);
+void http_destroy_resp(struct http_resp_header *resp);
+int http_serialize_resp(struct http_resp_header *resp, char *buf);
 
 const char *http_strmsg(int code);
 
