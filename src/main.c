@@ -1,58 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <signal.h>
 #include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/select.h>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include "http.h"
-#include "mime.h"
+#include <signal.h>
+#include "tinyweb.h"
 
-/* HTTP version */
-#define HTTP_VER_MAJOR	1
-#define HTTP_VER_MINOR	1
-#define HTTP_VER_STR	"1.1"
-
-/* maximum request length: 64mb */
-#define MAX_REQ_LENGTH	(65536 * 1024)
-
-struct client {
-	int s;
-	char *rcvbuf;
-	int bufsz;
-	struct client *next;
-};
-
-int start_server(void);
-int accept_conn(int lis);
-void close_conn(struct client *c);
-int handle_client(struct client *c);
-int do_get(struct client *c, const char *uri, int with_body);
-void respond_error(struct client *c, int errcode);
-void sighandler(int s);
 int parse_args(int argc, char **argv);
-
-static int lis;
-static int port = 8080;
-static struct client *clist;
-
-static const char *indexfiles[] = {
-	"index.cgi",
-	"index.html",
-	"index.htm",
-	0
-};
+void sighandler(int s);
 
 
 int main(int argc, char **argv)
 {
+	int *sockets, num_sockets, sockets_arr_size = 0;
+
 	if(parse_args(argc, argv) == -1) {
 		return 1;
 	}
@@ -61,279 +21,47 @@ int main(int argc, char **argv)
 	signal(SIGTERM, sighandler);
 	signal(SIGQUIT, sighandler);
 
-	if((lis = start_server()) == -1) {
-		return 1;
-	}
+	tw_start();
 
 	for(;;) {
-		struct client *c, dummy;
-		int maxfd = lis;
+		int i;
 		fd_set rdset;
 
+		num_sockets = tw_get_sockets(0);
+		if(num_sockets > sockets_arr_size) {
+			int newsz = sockets_arr_size ? sockets_arr_size * 2 : 16;
+			int *newarr = realloc(sockets, newsz * sizeof *sockets);
+			if(!newarr) {
+				fprintf(stderr, "failed to allocate sockets array\n");
+				tw_stop();
+				return 1;
+			}
+			sockets = newarr;
+			sockets_arr_size = newsz;
+		}
+		tw_get_sockets(sockets);
+
 		FD_ZERO(&rdset);
-		FD_SET(lis, &rdset);
-
-		c = clist;
-		while(c) {
-			if(c->s > maxfd) {
-				maxfd = c->s;
-			}
-			FD_SET(c->s, &rdset);
-			c = c->next;
+		for(i=0; i<num_sockets; i++) {
+			FD_SET(sockets[i], &rdset);
 		}
 
-		while(select(maxfd + 1, &rdset, 0, 0, 0) == -1 && errno == EINTR);
+		while(select(tw_get_maxfd() + 1, &rdset, 0, 0, 0) == -1 && errno == EINTR);
 
-		c = clist;
-		while(c) {
-			if(FD_ISSET(c->s, &rdset)) {
-				handle_client(c);
-			}
-			c = c->next;
-		}
-
-		if(FD_ISSET(lis, &rdset)) {
-			accept_conn(lis);
-		}
-
-		dummy.next = clist;
-		c = &dummy;
-
-		while(c->next) {
-			struct client *n = c->next;
-
-			if(n->s == -1) {
-				/* marked for removal */
-				c->next = n->next;
-				free(n);
-			} else {
-				c = c->next;
+		for(i=0; i<num_sockets; i++) {
+			if(FD_ISSET(sockets[i], &rdset)) {
+				tw_handle_socket(sockets[i]);
 			}
 		}
-		clist = dummy.next;
 	}
 
 	return 0;	/* unreachable */
 }
 
-int start_server(void)
-{
-	int s;
-	struct sockaddr_in sa;
-
-	if((s = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
-		perror("failed to create listening socket");
-		return -1;
-	}
-	fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK);
-
-	memset(&sa, 0, sizeof sa);
-	sa.sin_family = AF_INET;
-	sa.sin_addr.s_addr = INADDR_ANY;
-	sa.sin_port = htons(port);
-
-	if(bind(s, (struct sockaddr*)&sa, sizeof sa) == -1) {
-		fprintf(stderr, "failed to bind socket to port %d: %s\n", port, strerror(errno));
-		return -1;
-	}
-	listen(s, 16);
-
-	return s;
-}
-
-int accept_conn(int lis)
-{
-	int s;
-	struct client *c;
-	struct sockaddr_in addr;
-	socklen_t addr_sz = sizeof addr;
-
-	if((s = accept(lis, (struct sockaddr*)&addr, &addr_sz)) == -1) {
-		perror("failed to accept incoming connection");
-		return -1;
-	}
-	fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK);
-
-	if(!(c = malloc(sizeof *c))) {
-		perror("failed to allocate memory while accepting connection");
-		return -1;
-	}
-	c->s = s;
-	c->rcvbuf = 0;
-	c->bufsz = 0;
-	c->next = clist;
-	clist = c;
-	return 0;
-}
-
-void close_conn(struct client *c)
-{
-	close(c->s);
-	c->s = -1;	/* mark it for removal */
-	free(c->rcvbuf);
-}
-
-int handle_client(struct client *c)
-{
-	struct http_req_header hdr;
-	static char buf[2048];
-	int rdsz, status;
-
-	while((rdsz = recv(c->s, buf, sizeof buf, 0)) > 0) {
-		char *newbuf;
-		int newsz = c->bufsz + rdsz;
-		if(newsz > MAX_REQ_LENGTH) {
-			respond_error(c, 413);
-			return -1;
-		}
-
-		if(!(newbuf = realloc(c->rcvbuf, newsz + 1))) {
-			fprintf(stderr, "failed to allocate %d byte buffer\n", newsz);
-			respond_error(c, 503);
-			return -1;
-		}
-
-		memcpy(newbuf + c->bufsz, buf, rdsz);
-		newbuf[newsz] = 0;
-
-		c->rcvbuf = newbuf;
-		c->bufsz = newsz;
-	}
-
-	if((status = http_parse_header(&hdr, c->rcvbuf, c->bufsz)) != HTTP_HDR_OK) {
-		http_print_header(&hdr);
-		switch(status) {
-		case HTTP_HDR_INVALID:
-			respond_error(c, 400);
-			return -1;
-
-		case HTTP_HDR_NOMEM:
-			respond_error(c, 503);
-			return -1;
-
-		case HTTP_HDR_PARTIAL:
-			return 0;	/* partial header, continue reading */
-		}
-	}
-	http_print_header(&hdr);
-
-	/* we only support GET and HEAD at this point, so freak out on anything else */
-	switch(hdr.method) {
-	case HTTP_GET:
-		do_get(c, hdr.uri, 1);
-		break;
-
-	case HTTP_HEAD:
-		do_get(c, hdr.uri, 0);
-		break;
-
-	default:
-		respond_error(c, 501);
-		return -1;
-	}
-
-	close_conn(c);
-	return 0;
-}
-
-int do_get(struct client *c, const char *uri, int with_body)
-{
-	const char *ptr;
-	struct http_resp_header resp;
-
-	if((ptr = strstr(uri, "://"))) {
-		/* skip the host part */
-		if(!(uri = strchr(ptr + 3, '/'))) {
-			respond_error(c, 404);
-			return -1;
-		}
-		++uri;
-	}
-
-	if(*uri) {
-		struct stat st;
-		char *path = 0;
-		char *buf;
-		const char *type;
-		int fd, size;
-
-		if(stat(uri, &st) == -1) {
-			respond_error(c, 404);
-			return -1;
-		}
-
-		if(S_ISDIR(st.st_mode)) {
-			int i;
-			path = alloca(strlen(uri) + 64);
-
-			for(i=0; indexfiles[i]; i++) {
-				sprintf(path, "%s/%s", uri, indexfiles[i]);
-				if(stat(path, &st) == 0 && !S_ISDIR(st.st_mode)) {
-					break;
-				}
-			}
-
-			if(indexfiles[i] == 0) {
-				respond_error(c, 404);
-				return -1;
-			}
-		} else {
-			path = (char*)uri;
-		}
-
-		if((fd = open(path, O_RDONLY)) == -1) {
-			respond_error(c, 403);
-			return -1;
-		}
-
-		/* construct response header */
-		http_init_resp(&resp);
-		http_add_resp_field(&resp, "Content-Length: %d", st.st_size);
-		if((type = mime_type(path))) {
-			http_add_resp_field(&resp, "Content-Type: %s", type);
-		}
-
-		size = http_serialize_resp(&resp, 0);
-		buf = alloca(size);
-		http_serialize_resp(&resp, buf);
-		send(c->s, buf, size, 0);
-
-		if(with_body) {
-			char *cont = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-			if(cont == (void*)-1) {
-				respond_error(c, 503);
-				close(fd);
-				return -1;
-			}
-		}
-
-		close(fd);
-	}
-	return 0;
-}
-
-void respond_error(struct client *c, int errcode)
-{
-	char buf[512];
-
-	sprintf(buf, HTTP_VER_STR " %d %s\r\n\r\n", errcode, http_strmsg(errcode));
-
-	send(c->s, buf, strlen(buf), 0);
-	close_conn(c);
-}
-
 void sighandler(int s)
 {
 	if(s == SIGINT || s == SIGTERM || s == SIGQUIT) {
-		close(lis);
-		while(clist) {
-			struct client *c = clist;
-			clist = clist->next;
-			close_conn(c);
-			free(c);
-		}
-		clist = 0;
-
+		tw_stop();
 		printf("bye!\n");
 		exit(0);
 	}
@@ -356,9 +84,13 @@ int parse_args(int argc, char **argv)
 		if(argv[i][0] == '-' && argv[i][2] == 0) {
 			switch(argv[i][1]) {
 			case 'p':
-				if((port = atoi(argv[++i])) == 0) {
-					fprintf(stderr, "-p must be followed by a valid port number\n");
-					return -1;
+				{
+					int port = atoi(argv[++i]);
+					if(!port) {
+						fprintf(stderr, "-p must be followed by a valid port number\n");
+						return -1;
+					}
+					tw_set_port(port);
 				}
 				break;
 

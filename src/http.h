@@ -36,9 +36,9 @@ struct http_resp_header {
 #define HTTP_HDR_NOMEM		-2
 #define HTTP_HDR_PARTIAL	-3
 
-int http_parse_header(struct http_req_header *hdr, const char *buf, int bufsz);
-void http_print_header(struct http_req_header *hdr);
-void http_destroy_header(struct http_req_header *hdr);
+int http_parse_request(struct http_req_header *hdr, const char *buf, int bufsz);
+void http_log_request(struct http_req_header *hdr);
+void http_destroy_request(struct http_req_header *hdr);
 
 int http_init_resp(struct http_resp_header *resp);
 int http_add_resp_field(struct http_resp_header *resp, const char *fmt, ...);

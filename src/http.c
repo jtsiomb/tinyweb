@@ -5,9 +5,10 @@
 #include <ctype.h>
 #include <alloca.h>
 #include "http.h"
+#include "logger.h"
 
 
-const char *http_method_str[] = {
+static const char *http_method_str[] = {
 	"<unknown>",
 	"OPTIONS",
 	"GET",
@@ -22,13 +23,13 @@ const char *http_method_str[] = {
 
 
 /* HTTP 1xx message strings */
-const char *http_msg1xx[] = {
+static const char *http_msg1xx[] = {
 	"Continue",					/* 100 */
 	"Switching Protocols"		/* 101 */
 };
 
 /* HTTP 2xx message strings */
-const char *http_msg2xx[] = {
+static const char *http_msg2xx[] = {
 	"OK",						/* 200 */
 	"Created",					/* 201 */
 	"Accepted",					/* 202 */
@@ -39,7 +40,7 @@ const char *http_msg2xx[] = {
 };
 
 /* HTTP 3xx message strings */
-const char *http_msg3xx[] = {
+static const char *http_msg3xx[] = {
 	"Multiple Choices",			/* 300 */
 	"Moved Permanently",		/* 301 */
 	"Found",					/* 302 */
@@ -51,7 +52,7 @@ const char *http_msg3xx[] = {
 };
 
 /* HTTP 4xx error strings */
-const char *http_msg4xx[] = {
+static const char *http_msg4xx[] = {
 	"Bad Request",				/* 400 */
 	"Unauthorized",				/* 401 */
 	"What the Fuck?",			/* 402 */
@@ -73,7 +74,7 @@ const char *http_msg4xx[] = {
 };
 
 /* HTTP 5xx error strings */
-const char *http_msg5xx[] = {
+static const char *http_msg5xx[] = {
 	"Internal Server Error",	/* 500 */
 	"Not Implemented",			/* 501 */
 	"Bad Gateway",				/* 502 */
@@ -86,7 +87,7 @@ const char *http_msg5xx[] = {
 static enum http_method parse_method(const char *s);
 
 
-int http_parse_header(struct http_req_header *hdr, const char *buf, int bufsz)
+int http_parse_request(struct http_req_header *hdr, const char *buf, int bufsz)
 {
 	int i, nlines = 0;
 	char *rqline = 0;
@@ -167,23 +168,23 @@ int http_parse_header(struct http_req_header *hdr, const char *buf, int bufsz)
 	return HTTP_HDR_OK;
 }
 
-void http_print_header(struct http_req_header *hdr)
+void http_log_request(struct http_req_header *hdr)
 {
 	int i;
 
-	printf("HTTP request header\n");
-	printf(" method: %s\n", http_method_str[hdr->method]);
-	printf(" uri: %s\n", hdr->uri);
-	printf(" version: %d.%d\n", hdr->ver_major, hdr->ver_minor);
-	printf(" fields (%d):\n", hdr->num_hdrfields);
+	logmsg("HTTP request header\n");
+	logmsg(" method: %s\n", http_method_str[hdr->method]);
+	logmsg(" uri: %s\n", hdr->uri);
+	logmsg(" version: %d.%d\n", hdr->ver_major, hdr->ver_minor);
+	logmsg(" fields (%d):\n", hdr->num_hdrfields);
 
 	for(i=0; i<hdr->num_hdrfields; i++) {
-		printf("   %s\n", hdr->hdrfields[i]);
+		logmsg("   %s\n", hdr->hdrfields[i]);
 	}
-	putchar('\n');
+	logmsg("\n");
 }
 
-void http_destroy_header(struct http_req_header *hdr)
+void http_destroy_request(struct http_req_header *hdr)
 {
 	int i;
 
@@ -211,7 +212,7 @@ int http_add_resp_field(struct http_resp_header *resp, const char *fmt, ...)
 {
 	int sz;
 	va_list ap;
-	char *field, *newarr, tmp;
+	char *field, **newarr, tmp;
 
 	va_start(ap, fmt);
 	sz = vsnprintf(&tmp, 0, fmt, ap);
@@ -229,7 +230,9 @@ int http_add_resp_field(struct http_resp_header *resp, const char *fmt, ...)
 		free(field);
 		return -1;
 	}
-	resp->fields[resp->num_fields++] = newarr;
+	resp->fields = newarr;
+
+	resp->fields[resp->num_fields++] = field;
 	return 0;
 }
 

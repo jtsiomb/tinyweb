@@ -33,7 +33,7 @@ static int init_types(void)
 
 	if(types) return 0;
 
-	if(rb_init(types, RB_KEY_STRING) == -1) {
+	if((types = rb_create(RB_KEY_STRING))) {
 		return -1;
 	}
 	rb_set_delete_func(types, del_func, 0);
