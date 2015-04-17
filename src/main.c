@@ -94,6 +94,12 @@ int parse_args(int argc, char **argv)
 				}
 				break;
 
+			case 'c':
+				if(tw_set_root(argv[++i]) == -1) {
+					return -1;
+				}
+				break;
+
 			case 'h':
 				print_help(argv[0]);
 				exit(0);

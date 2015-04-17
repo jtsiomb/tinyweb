@@ -124,11 +124,6 @@ int tw_get_sockets(int *socks)
 {
 	struct client *c, dummy;
 
-	if(!socks) {
-		/* just return the count */
-		return num_clients + 1;	/* +1 for the listening socket */
-	}
-
 	/* first cleanup the clients marked for removal */
 	dummy.next = clist;
 	c = &dummy;
@@ -146,6 +141,12 @@ int tw_get_sockets(int *socks)
 		}
 	}
 	clist = dummy.next;
+
+
+	if(!socks) {
+		/* just return the count */
+		return num_clients + 1;	/* +1 for the listening socket */
+	}
 
 	/* go through the client list and populate the array */
 	maxfd = lis;
@@ -210,6 +211,7 @@ static int accept_conn(int lis)
 	c->bufsz = 0;
 	c->next = clist;
 	clist = c;
+	++num_clients;
 	return 0;
 }
 
@@ -364,6 +366,7 @@ static int do_get(struct client *c, const char *uri, int with_body)
 				int sz = cont_left < 4096 ? cont_left : 4096;
 				send(c->s, ptr, sz, 0);
 				ptr += sz;
+				cont_left -= sz;
 			}
 
 			munmap(cont, st.st_size);
