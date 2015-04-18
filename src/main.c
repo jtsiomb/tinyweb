@@ -21,7 +21,9 @@ int main(int argc, char **argv)
 	signal(SIGTERM, sighandler);
 	signal(SIGQUIT, sighandler);
 
-	tw_start();
+	if(tw_start() == -1) {
+		return 1;
+	}
 
 	for(;;) {
 		int i;

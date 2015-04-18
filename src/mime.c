@@ -17,8 +17,7 @@ static struct mime_type def_types[] = {
 	{"jpeg", "image/jpeg"},
 	{"gif", "image/gif"},
 	{"bmp", "image/bmp"},
-	{"cgi", 0}
-,
+	{"cgi", 0},
 	{0, 0}
 };
 
@@ -33,7 +32,7 @@ static int init_types(void)
 
 	if(types) return 0;
 
-	if((types = rb_create(RB_KEY_STRING))) {
+	if(!(types = rb_create(RB_KEY_STRING))) {
 		return -1;
 	}
 	rb_set_delete_func(types, del_func, 0);
@@ -54,7 +53,7 @@ int add_mime_type(const char *suffix, const char *type)
 {
 	init_types();
 
-	return rb_insert(types, strdup(suffix), strdup(type));
+	return rb_insert(types, strdup(suffix), type ? strdup(type) : 0);
 }
 
 const char *mime_type(const char *path)
