@@ -1,4 +1,7 @@
 \.o$
 \.d$
 \.swp$
+\.a$
+\.so$
+\.so\.
 ^tinywebd$
