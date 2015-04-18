@@ -1,9 +1,9 @@
-/*
-rbtree - simple balanced binary search tree (red-black tree) library.
-Copyright (C) 2011-2014  John Tsiombikas <nuclear@member.fsf.org>
-
-rbtree is free software, feel free to use, modify, and redistribute it, under
-the terms of the 3-clause BSD license. See COPYING for details.
+/* tinyweb - tiny web server library and daemon
+ * Author: John Tsiombikas <nuclear@member.fsf.org>
+ *
+ * This program is placed in the public domain. Feel free to use it any
+ * way you like. Mentions and retaining this attribution header will be
+ * appreciated, but not required.
  */
 #include <stdio.h>
 #include <stdlib.h>
