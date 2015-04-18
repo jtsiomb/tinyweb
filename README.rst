@@ -7,8 +7,10 @@ The tinyweb project includes a rudimentary web server in library form
 Author: John Tsiombikas <nuclear@member.fsf.org>
 
 I disclaim all copyright to this program, and place it in the public domain.
-Feel free to use it any way you like. I'd appreciate a mention and an email
-saying hi, but whatever.
+Feel free to use it any way you like. Mentions and retaining the attribution
+headers at the top of the source code would be appreciated, but not required.
+
+Feel free to send me an email if you find a cool use for this code.
 
 Download
 --------
