@@ -22,3 +22,19 @@ Usage
 -----
 See ``src/main.c`` as an example on how to use libtinyweb, and read the header
 file ``libtinyweb/src/tinyweb.h`` which is very simple, and heavily commented.
+
+It will serve everything under the current working directory. Default port is
+8080.
+
+Bugs
+----
+Issues that I intend to fix or improve at some point:
+
+- Only GET and HEAD HTTP requests are currently implemented.
+- Doesn't support partial downloads.
+- It's supposed to be cross platform, but it isn't yet (UNIX only).
+
+Issues that are the way they are by design:
+
+- Tinywebd is not really a daemon (doesn't release controlling terminal).
+- Doesn't scale well to lots of simultaneous clients (to keep it simple).
