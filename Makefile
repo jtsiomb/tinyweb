@@ -1,3 +1,5 @@
+PREFIX = /usr/local
+
 src = $(wildcard src/*.c)
 obj = $(src:.c=.o)
 dep = $(obj:.o=.d)
@@ -10,8 +12,9 @@ LDFLAGS = -Llibtinyweb -Wl,-rpath=libtinyweb -ltinyweb
 $(bin): $(obj) $(weblib)
 	$(CC) -o $@ $(obj) $(LDFLAGS)
 
+.PHONY: $(weblib)
 $(weblib):
-	$(MAKE) -C libtinyweb
+	$(MAKE) -C libtinyweb PREFIX=$(PREFIX)
 
 -include $(dep)
 
@@ -26,6 +29,7 @@ clean:
 install: $(bin)
 	mkdir -p $(PREFIX)/bin
 	cp $(bin) $(DESTDIR)$(PREFIX)/bin/$(bin)
+	$(MAKE) -C libtinyweb PREFIX=$(PREFIX) install
 
 .PHONY: uninstall
 uninstall:

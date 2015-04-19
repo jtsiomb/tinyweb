@@ -30,6 +30,7 @@ all: $(alib) $(solib)
 $(solib): $(obj)
 	$(CC) -o $@ $(shared) $(obj) $(LDFLAGS)
 	[ -n "$(soname)" ] && \
+		rm -f $(soname) $(ldname) && \
 		ln -s $(solib) $(soname) && \
 		ln -s $(soname) $(ldname) || true
 
@@ -57,6 +58,7 @@ install: $(alib) $(solib)
 	cp $(solib) $(DESTDIR)$(PREFIX)/lib/$(solib)
 	[ -n "$(soname)" ] && \
 		cd $(DESTDIR)$(PREFIX)/lib && \
+		rm -f $(soname) $(ldname) && \
 		ln -s $(solib) $(soname) && \
 		ln -s $(soname) $(ldname) || \
 		true
